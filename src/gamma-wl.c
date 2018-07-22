@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <alloca.h>
+#include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -35,6 +36,7 @@
 #endif
 
 #include "gamma-wl.h"
+#include "os-compatibility.h"
 #include "colorramp.h"
 
 #include "gamma-control-client-protocol.h"
@@ -45,7 +47,7 @@ typedef struct {
 	struct wl_registry *registry;
 	struct wl_callback *callback;
 	uint32_t gamma_control_manager_id;
-	struct gamma_control_manager *gamma_control_manager;
+	struct zwlr_gamma_control_manager_v1 *gamma_control_manager;
 	int num_outputs;
 	struct output *outputs;
 	int authorized;
@@ -54,7 +56,7 @@ typedef struct {
 struct output {
 	uint32_t global_id;
 	struct wl_output *output;
-	struct gamma_control *gamma_control;
+	struct zwlr_gamma_control_v1 *gamma_control;
 	uint32_t gamma_size;
 };
 
@@ -79,7 +81,7 @@ authorizer_feedback_granted(void *data, struct orbital_authorizer_feedback *feed
 static void
 authorizer_feedback_denied(void *data, struct orbital_authorizer_feedback *feedback)
 {
-	fprintf(stderr, _("Fatal: redshift was not authorized to bind the 'gamma_control_manager' interface.\n"));
+	fprintf(stderr, _("Fatal: redshift was not authorized to bind the 'zwlr_gamma_control_manager_v1' interface.\n"));
 	exit(EXIT_FAILURE);
 }
 
@@ -93,9 +95,9 @@ registry_global(void *data, struct wl_registry *registry, uint32_t id, const cha
 {
 	wayland_state_t *state = data;
 
-	if (strcmp(interface, "gamma_control_manager") == 0) {
+	if (strcmp(interface, "zwlr_gamma_control_manager_v1") == 0) {
 		state->gamma_control_manager_id = id;
-		state->gamma_control_manager = wl_registry_bind(registry, id, &gamma_control_manager_interface, 1);
+		state->gamma_control_manager = wl_registry_bind(registry, id, &zwlr_gamma_control_manager_v1_interface, 1);
 	} else if (strcmp(interface, "wl_output") == 0) {
 		state->num_outputs++;
 		if (!(state->outputs = realloc(state->outputs, state->num_outputs * sizeof(struct output)))) {
@@ -113,7 +115,7 @@ registry_global(void *data, struct wl_registry *registry, uint32_t id, const cha
 		struct orbital_authorizer *auth = wl_registry_bind(registry, id, &orbital_authorizer_interface, 1u);
 		wl_proxy_set_queue((struct wl_proxy *)auth, queue);
 
-		struct orbital_authorizer_feedback *feedback = orbital_authorizer_authorize(auth, "gamma_control_manager");
+		struct orbital_authorizer_feedback *feedback = orbital_authorizer_authorize(auth, "zwlr_gamma_control_manager_v1");
 		orbital_authorizer_feedback_add_listener(feedback, &authorizer_feedback_listener, state);
 
 		int ret = 0;
@@ -133,14 +135,17 @@ registry_global_remove(void *data, struct wl_registry *registry, uint32_t id)
 	wayland_state_t *state = data;
 
 	if (state->gamma_control_manager_id == id) {
-		fprintf(stderr, _("The gamma_control_manager was removed\n"));
+		fprintf(stderr, _("The zwlr_gamma_control_manager_v1 was removed\n"));
 		exit(EXIT_FAILURE);
 	}
 
 	for (int i = 0; i < state->num_outputs; ++i) {
 		struct output *output = &state->outputs[i];
 		if (output->global_id == id) {
-			gamma_control_destroy(output->gamma_control);
+			if (output->gamma_control) {
+				zwlr_gamma_control_v1_destroy(output->gamma_control);
+				output->gamma_control = NULL;
+			}
 			wl_output_destroy(output->output);
 
 			/* If the removed output is not the last one in the array move the last one
@@ -161,14 +166,21 @@ static const struct wl_registry_listener registry_listener = {
 };
 
 static void
-gamma_control_gamma_size(void *data, struct gamma_control *control, uint32_t size)
+gamma_control_gamma_size(void *data, struct zwlr_gamma_control_v1 *control, uint32_t size)
 {
 	struct output *output = data;
 	output->gamma_size = size;
 }
 
-static const struct gamma_control_listener gamma_control_listener = {
-	gamma_control_gamma_size
+static void
+gamma_control_failed(void *data, struct zwlr_gamma_control_v1 *control)
+{
+}
+
+
+static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
+	gamma_control_gamma_size,
+	gamma_control_failed
 };
 
 static int
@@ -199,7 +211,10 @@ wayland_restore(wayland_state_t *state)
 {
 	for (int i = 0; i < state->num_outputs; ++i) {
 		struct output *output = &state->outputs[i];
-		gamma_control_reset_gamma(output->gamma_control);
+		if (output->gamma_control) {
+			zwlr_gamma_control_v1_destroy(output->gamma_control);
+			output->gamma_control = NULL;
+		}
 	}
 	wl_display_flush(state->display);
 }
@@ -220,14 +235,15 @@ wayland_free(wayland_state_t *state)
 
 	for (int i = 0; i < state->num_outputs; ++i) {
 		struct output *output = &state->outputs[i];
-                if (output!=NULL && output->gamma_control!=NULL) {   
-		  gamma_control_destroy(output->gamma_control);
-                }
+		if (output->gamma_control) {
+			zwlr_gamma_control_v1_destroy(output->gamma_control);
+			output->gamma_control = NULL;
+		}
 		wl_output_destroy(output->output);
 	}
 
 	if (state->gamma_control_manager) {
-		gamma_control_manager_destroy(state->gamma_control_manager);
+		zwlr_gamma_control_manager_v1_destroy(state->gamma_control_manager);
 	}
 	if (state->registry) {
 		wl_registry_destroy(state->registry);
@@ -268,12 +284,6 @@ static int
 wayland_set_temperature(wayland_state_t *state, const color_setting_t *setting)
 {
 	int ret = 0, roundtrip = 0;
-	struct wl_array red;
-	struct wl_array green;
-	struct wl_array blue;
-	uint16_t *r_gamma = NULL;
-	uint16_t *g_gamma = NULL;
-	uint16_t *b_gamma = NULL;
 
 	/* We wait for the sync callback to throttle a bit and not send more
 	 * requests than the compositor can manage, otherwise we'd get disconnected.
@@ -290,8 +300,8 @@ wayland_set_temperature(wayland_state_t *state, const color_setting_t *setting)
 	for (int i = 0; i < state->num_outputs; ++i) {
 		struct output *output = &state->outputs[i];
 		if (!output->gamma_control) {
-			output->gamma_control = gamma_control_manager_get_gamma_control(state->gamma_control_manager, output->output);
-			gamma_control_add_listener(output->gamma_control, &gamma_control_listener, output);
+			output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(state->gamma_control_manager, output->output);
+			zwlr_gamma_control_v1_add_listener(output->gamma_control, &gamma_control_listener, output);
 			roundtrip = 1;
 		}
 	}
@@ -299,32 +309,27 @@ wayland_set_temperature(wayland_state_t *state, const color_setting_t *setting)
 		wl_display_roundtrip(state->display);
 	}
 
-	wl_array_init(&red);
-	wl_array_init(&green);
-	wl_array_init(&blue);
-
 	for (int i = 0; i < state->num_outputs; ++i) {
 		struct output *output = &state->outputs[i];
 		int size = output->gamma_size;
-		size_t byteSize = size * sizeof(uint16_t);
+		size_t ramp_bytes = size * sizeof(uint16_t);
+		size_t total_bytes = ramp_bytes * 3;
 
-		if (red.size < byteSize) {
-			wl_array_add(&red, byteSize - red.size);
-		}
-		if (green.size < byteSize) {
-			wl_array_add(&green, byteSize - green.size);
-		}
-		if (blue.size < byteSize) {
-			wl_array_add(&blue, byteSize - blue.size);
-		}
-
-		r_gamma = red.data;
-		g_gamma = green.data;
-		b_gamma = blue.data;
-
-		if (!r_gamma || !g_gamma || !b_gamma) {
+		int fd = os_create_anonymous_file(total_bytes);
+		if (fd < 0) {
 			return -1;
 		}
+
+		void *ptr = mmap(NULL, total_bytes,
+			PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+		if (ptr == MAP_FAILED) {
+			close(fd);
+			return -1;
+		}
+
+		uint16_t *r_gamma = ptr;
+		uint16_t *g_gamma = ptr + ramp_bytes;
+		uint16_t *b_gamma = ptr + 2 * ramp_bytes;
 
 		/* Initialize gamma ramps to pure state */
 		for (int i = 0; i < size; i++) {
@@ -335,17 +340,15 @@ wayland_set_temperature(wayland_state_t *state, const color_setting_t *setting)
 		}
 
 		colorramp_fill(r_gamma, g_gamma, b_gamma, size, setting);
+		munmap(ptr, size);
 
-		gamma_control_set_gamma(output->gamma_control, &red, &green, &blue);
+		zwlr_gamma_control_v1_set_gamma(output->gamma_control, fd);
+		close(fd);
 	}
 
 	state->callback = wl_display_sync(state->display);
 	wl_callback_add_listener(state->callback, &callback_listener, state);
 	wl_display_flush(state->display);
-
-	wl_array_release(&red);
-	wl_array_release(&green);
-	wl_array_release(&blue);
 
 	return 0;
 }

@@ -45,7 +45,7 @@ redshift_LDADD += \
 endif
 
 if ENABLE_WAYLAND
-redshift_SOURCES += gamma-wl.c gamma-wl.h
+redshift_SOURCES += gamma-wl.c gamma-wl.h os-compatibility.c os-compatibility.h
 
 AM_CFLAGS += $(WAYLAND_CFLAGS)
 
