@@ -906,6 +906,9 @@ main(int argc, char *argv[])
 
 	/* List of gamma methods. */
 	const gamma_method_t gamma_methods[] = {
+#ifdef ENABLE_WAYLAND
+		wl_gamma_method,
+#endif
 #ifdef ENABLE_DRM
 		drm_gamma_method,
 #endif
@@ -920,9 +923,6 @@ main(int argc, char *argv[])
 #endif
 #ifdef ENABLE_WINGDI
 		w32gdi_gamma_method,
-#endif
-#ifdef ENABLE_WAYLAND
-		wl_gamma_method,
 #endif
 		dummy_gamma_method,
 		{ NULL }
