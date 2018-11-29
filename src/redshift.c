@@ -1244,11 +1244,12 @@ main(int argc, char *argv[])
 				exit(EXIT_FAILURE);
 			}
 
-			/* In Quartz (macOS) the gamma adjustments will
-			   automatically revert when the process exits.
+			/* In Quartz (macOS) and wayland, the gamma adjustments
+			   will automatically revert when the process exits.
 			   Therefore, we have to loop until CTRL-C is received.
 			   */
-			if (strcmp(options.method->name, "quartz") == 0) {
+			if (strcmp(options.method->name, "quartz") == 0 ||
+					strcmp(options.method->name, "wayland") == 0) {
 				fputs(_("Press ctrl-c to stop...\n"), stderr);
 				pause();
 			}
@@ -1273,10 +1274,11 @@ main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 
-		/* In Quartz (OSX) the gamma adjustments will automatically
-		   revert when the process exits. Therefore, we have to loop
-		   until CTRL-C is received. */
-		if (strcmp(options.method->name, "quartz") == 0) {
+		/* In Quartz (OSX) and wayland, the gamma adjustments will
+		   automatically revert when the process exits.
+		   Therefore, we have to loop until CTRL-C is received. */
+		if (strcmp(options.method->name, "quartz") == 0 ||
+				strcmp(options.method->name, "wayland") == 0) {
 			fputs(_("Press ctrl-c to stop...\n"), stderr);
 			pause();
 		}
@@ -1295,10 +1297,11 @@ main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 
-		/* In Quartz (OSX) the gamma adjustments will automatically
-		   revert when the process exits. Therefore, we have to loop
-		   until CTRL-C is received. */
-		if (strcmp(options.method->name, "quartz") == 0) {
+		/* In Quartz (OSX) and wayland, the gamma adjustments will
+		   automatically revert when the process exits.
+		   Therefore, we have to loop until CTRL-C is received. */
+		if (strcmp(options.method->name, "quartz") == 0 ||
+				strcmp(options.method->name, "wayland") == 0) {
 			fputs(_("Press ctrl-c to stop...\n"), stderr);
 			pause();
 		}
