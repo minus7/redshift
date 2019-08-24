@@ -63,6 +63,8 @@ BUILT_SOURCES = \
 	gamma-control-client-protocol.h \
 	orbital-authorizer-protocol.c \
 	orbital-authorizer-client-protocol.h
+
+EXTRA_DIST += gamma-control.xml orbital-authorizer.xml
 endif
 
 if ENABLE_RANDR
